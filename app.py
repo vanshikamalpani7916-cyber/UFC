@@ -1,76 +1,77 @@
 import streamlit as st
 import os
+import zipfile
 from markitdown import MarkItDown
 from io import BytesIO
 
 # Initialize MarkItDown engine
-# Note: MarkItDown handles Word, Excel, PPT, PDF, and HTML natively.
 md = MarkItDown()
 
-def convert_file(uploaded_file):
-    """Processes the uploaded file and returns markdown string."""
+def format_size(bytes_size):
+    """Converts bytes to a human-readable string (MB)."""
+    return f"{bytes_size / (1024 * 1024):.4f} MB"
+
+def process_file_content(file_obj, filename):
+    """Core conversion logic with error handling and stable processing."""
     try:
-        # MarkItDown can take a file-like object or a path. 
-        # For Streamlit, we pass the uploaded file object.
-        result = md.convert(uploaded_file)
+        # markitdown processes the file object directly
+        result = md.convert(file_obj)
         return result.text_content
-    except Exception as e:
-        st.error(f"⚠️ Could not read {uploaded_file.name}. Please check the format.")
+    except Exception:
+        st.error(f"⚠️ Could not read {filename}. Please check if the format is supported or corrupted.")
         return None
 
-# --- UI Layout ---
-st.set_page_config(page_title="Universal Document Reader", page_icon="📄")
+def display_file_ui(content, original_size, filename):
+    """Renders the Tabbed UI for each successfully processed file."""
+    base_name = os.path.splitext(filename)[0]
+    converted_bytes = len(content.encode('utf-8'))
+    
+    # Create Tabs for Preview and Analytics
+    tab_preview, tab_stats = st.tabs(["📝 Text Preview", "📊 File Size Comparison"])
+    
+    with tab_preview:
+        st.text_area("Markdown Content", content, height=300, key=f"preview_{filename}")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                label="📥 Download .md",
+                data=content,
+                file_name=f"{base_name}_converted.md",
+                mime="text/markdown",
+                key=f"dl_md_{filename}"
+            )
+        with col2:
+            st.download_button(
+                label="📥 Download .txt",
+                data=content,
+                file_name=f"{base_name}_converted.txt",
+                mime="text/plain",
+                key=f"dl_txt_{filename}"
+            )
 
-st.title("📄 Universal Document Reader")
-st.markdown("Convert your Office docs, PDFs, and HTML files into clean **Markdown** or **Plain Text** instantly.")
+    with tab_stats:
+        # Comparison Table
+        st.table({
+            "File Version": ["Original File", "Converted Text"],
+            "Size (MB)": [format_size(original_size), format_size(converted_bytes)]
+        })
+        
+        # Percentage Calculation
+        if original_size > 0:
+            reduction = ((original_size - converted_bytes) / original_size) * 100
+            if reduction > 0:
+                st.success(f"✅ Text version is **{reduction:.1f}% smaller** than the original.")
+            else:
+                st.info("Note: The text output is slightly larger than the source (common for small/highly compressed files).")
 
-# [2] Upload Area (Supports multiple files)
+# --- Streamlit UI Setup ---
+st.set_page_config(page_title="Universal Doc-to-Text", page_icon="📑", layout="wide")
+
+st.title("📑 Universal Document-to-Text")
+st.markdown("Upload **Word, Excel, PPT, PDF, HTML, or ZIP** files to extract clean Markdown text.")
+
+# [Requirement 2] Upload Area
 uploaded_files = st.file_uploader(
     "Drag and drop files here", 
-    type=["docx", "xlsx", "pptx", "pdf", "html"], 
-    accept_multiple_files=True
-)
-
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        with st.spinner(f"Processing {uploaded_file.name}..."):
-            content = convert_file(uploaded_file)
-            
-            if content:
-                # Get the original filename without extension
-                base_name = os.path.splitext(uploaded_file.name)[0]
-                
-                # [2] Instant Preview
-                with st.expander(f"👁️ Preview: {uploaded_file.name}", expanded=True):
-                    st.text_area(
-                        label="Converted Content",
-                        value=content,
-                        height=300,
-                        key=f"text_{uploaded_file.name}"
-                    )
-                    
-                    # Layout for Download buttons
-                    col1, col2 = st.columns(2)
-                    
-                    # [4] Download as Markdown
-                    with col1:
-                        st.download_button(
-                            label="📥 Download as .md",
-                            data=content,
-                            file_name=f"{base_name}_converted.md",
-                            mime="text/markdown",
-                            key=f"md_{uploaded_file.name}"
-                        )
-                    
-                    # [4] Download as Text
-                    with col2:
-                        st.download_button(
-                            label="📥 Download as .txt",
-                            data=content,
-                            file_name=f"{base_name}_converted.txt",
-                            mime="text/plain",
-                            key=f"txt_{uploaded_file.name}"
-                        )
-
-st.divider()
-st.caption("Built with MarkItDown & Streamlit")
+    type=["docx", "xlsx", "pptx", "pdf", "html", "zip"],
